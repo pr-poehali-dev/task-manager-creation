@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useToast } from '@/hooks/use-toast';
 
 type Priority = 'high' | 'medium' | 'low';
 type TaskStatus = 'active' | 'completed';
@@ -26,63 +27,119 @@ interface Task {
   completed: boolean;
 }
 
-const Index = () => {
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: '1',
-      title: 'Подготовить презентацию для клиента',
-      priority: 'high',
-      tags: ['работа', 'срочно'],
-      deadline: new Date(2025, 10, 18),
-      completed: false,
-    },
-    {
-      id: '2',
-      title: 'Купить продукты',
-      priority: 'low',
-      tags: ['личное'],
-      deadline: new Date(2025, 10, 16),
-      completed: false,
-    },
-    {
-      id: '3',
-      title: 'Код-ревью нового модуля',
-      priority: 'medium',
-      tags: ['работа', 'разработка'],
-      deadline: new Date(2025, 10, 17),
-      completed: false,
-    },
-  ]);
+const API_URL = 'https://functions.poehali.dev/cd318144-760f-43f8-a395-87f91c44a278';
 
+const Index = () => {
+  const { toast } = useToast();
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [selectedPriority, setSelectedPriority] = useState<Priority>('medium');
   const [filterPriority, setFilterPriority] = useState<Priority | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'all'>('all');
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
-  const addTask = () => {
+  const fetchTasks = async () => {
+    try {
+      const response = await fetch(API_URL);
+      const data = await response.json();
+      const tasksWithDates = data.map((task: any) => ({
+        ...task,
+        deadline: task.deadline ? new Date(task.deadline) : undefined,
+      }));
+      setTasks(tasksWithDates);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось загрузить задачи',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTasks();
+  }, []);
+
+  const addTask = async () => {
     if (!newTaskTitle.trim()) return;
 
-    const newTask: Task = {
-      id: Date.now().toString(),
-      title: newTaskTitle,
-      priority: selectedPriority,
-      tags: [],
-      completed: false,
-    };
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newTaskTitle,
+          priority: selectedPriority,
+          tags: [],
+        }),
+      });
 
-    setTasks([newTask, ...tasks]);
-    setNewTaskTitle('');
+      const newTask = await response.json();
+      setTasks([{ ...newTask, deadline: undefined }, ...tasks]);
+      setNewTaskTitle('');
+      
+      toast({
+        title: 'Успешно',
+        description: 'Задача добавлена',
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось добавить задачу',
+        variant: 'destructive',
+      });
+    }
   };
 
-  const toggleTask = (id: string) => {
-    setTasks(tasks.map(task => 
-      task.id === id ? { ...task, completed: !task.completed } : task
-    ));
+  const toggleTask = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          completed: !task.completed,
+        }),
+      });
+
+      const updatedTask = await response.json();
+      setTasks(tasks.map(t => 
+        t.id === id ? { ...updatedTask, deadline: updatedTask.deadline ? new Date(updatedTask.deadline) : undefined } : t
+      ));
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось обновить задачу',
+        variant: 'destructive',
+      });
+    }
   };
 
-  const deleteTask = (id: string) => {
-    setTasks(tasks.filter(task => task.id !== id));
+  const deleteTask = async (id: string) => {
+    try {
+      await fetch(`${API_URL}?id=${id}`, {
+        method: 'DELETE',
+      });
+
+      setTasks(tasks.filter(task => task.id !== id));
+      
+      toast({
+        title: 'Успешно',
+        description: 'Задача удалена',
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось удалить задачу',
+        variant: 'destructive',
+      });
+    }
   };
 
   const filteredTasks = tasks.filter(task => {
@@ -115,6 +172,17 @@ const Index = () => {
   };
 
   const tasksWithDeadlines = tasks.filter(task => task.deadline && !task.completed);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Icon name="Loader2" size={48} className="animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Загрузка задач...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
